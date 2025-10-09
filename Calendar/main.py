@@ -2,7 +2,7 @@ import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem
 )
-from PySide6.QtCore import Qt, QMimeData, QPoint
+from PySide6.QtCore import Qt, QMimeData, QPoint, QSize
 from PySide6.QtGui import QDrag, QMouseEvent, QColor
 
 
@@ -12,6 +12,7 @@ class TaskList(QListWidget):
         super().__init__()
         self.dragStartPosition = None
         self.setDragEnabled(True)
+        self.setUniformItemSizes(False)
         tasks = {
             "Maths": "#FFD966",
             "Physics": "#9FC5E8",
@@ -20,10 +21,12 @@ class TaskList(QListWidget):
             "Biology": "#D9D2E9"
         }
 
+        # Configuration
         for name, color in tasks.items():
             item = QListWidgetItem(name)
             item.setBackground(QColor(color))
             item.setTextAlignment(Qt.AlignCenter)
+            item.setSizeHint(QSize(0, 50))
             self.addItem(item)
 
     def mousePressEvent(self, event):
@@ -54,6 +57,12 @@ class ScheduleTable(QTableWidget):
         super().__init__(rows, cols)
         self.setAcceptDrops(True)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Configuration
+        for row in range(self.rowCount()):
+            self.setRowHeight(row, 40)
+
+        for col in range(self.columnCount()):
+            self.setColumnWidth(col, 120)
 
     def dragEnterEvent(self, event):
         event.accept()
