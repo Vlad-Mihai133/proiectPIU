@@ -39,15 +39,17 @@ class ScheduleTable(QTableWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            item = self.itemAt(event.pos())
+            posf = event.position()  # QPointF
+            p = posf.toPoint()  # QPoint pentru itemAt/rowAt/columnAt
+            item = self.itemAt(p)
             if item is not None:
-                y = event.position().y()
+                y = posf.y()
                 near_top, near_bottom = self._is_near_vertical_edge(item, y)
                 if near_top or near_bottom:
                     self._begin_resize(item, 'top' if near_top else 'bottom')
                     return  # stop: suntem in mod resize
             # altfel: drag normal
-            self.dragStartPosition = event.pos()
+            self.dragStartPosition = p  # stocăm QPoint
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -56,9 +58,11 @@ class ScheduleTable(QTableWidget):
             return
 
         # feedback vizual cursor pe margini
-        item = self.itemAt(event.pos())
+        posf = event.position()
+        p = posf.toPoint()
+        item = self.itemAt(p)
         if item is not None:
-            self._update_edge_cursor(item, event.position().y())
+            self._update_edge_cursor(item, posf.y())
         else:
             self.viewport().unsetCursor()
 
@@ -67,7 +71,7 @@ class ScheduleTable(QTableWidget):
             return
         if not self.dragStartPosition:
             return
-        if (event.pos() - self.dragStartPosition).manhattanLength() < QApplication.startDragDistance():
+        if (p - self.dragStartPosition).manhattanLength() < QApplication.startDragDistance():
             return
 
         item = self.itemAt(self.dragStartPosition)
@@ -84,7 +88,7 @@ class ScheduleTable(QTableWidget):
         mimeData.setColorData(item.background().color())
         drag.setMimeData(mimeData)
 
-        result = drag.exec_(Qt.MoveAction)
+        result = drag.exec(Qt.MoveAction)
         if result == Qt.MoveAction:
             if self._last_drop_target != (src_row, src_col):
                 self.setSpan(src_row, src_col, 1, 1)
@@ -100,9 +104,12 @@ class ScheduleTable(QTableWidget):
     def mouseDoubleClickEvent(self, event):
         # Adauga un eveniment prin dublu click.
         import random
-        item = self.itemAt(event.pos())
-        row = self.rowAt(event.pos().y())
-        col = self.columnAt(event.pos().x())
+        posf = event.position()  # QPointF
+        p = posf.toPoint()  # QPoint
+
+        item = self.itemAt(p)
+        row = self.rowAt(p.y())
+        col = self.columnAt(p.x())
         if row < 0 or col < 0:
             return
 
