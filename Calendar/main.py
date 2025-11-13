@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QMimeData, QPoint
 from PySide6.QtGui import QDrag, QMouseEvent, QColor
-from PySide6.QtWidgets import QMessageBox
+
 
 class ScheduleTable(QTableWidget):
     def __init__(self, rows, cols):
@@ -33,39 +33,23 @@ class ScheduleTable(QTableWidget):
         for col in range(cols):
             self.setColumnWidth(col, 120)
 
-        # for row in range(rows):
-        #     for col in range(cols):
-        #         item = QTableWidgetItem()
-        #         item.setForeground(QColor(0, 0, 0))  # text negru
-        #         self.setItem(row, col, item)
-
         self.setHorizontalHeaderLabels(["Monday", "Tuesday", "Wednesday",
                                         "Thursday", "Friday", "Saturday", "Sunday"])
         self.setVerticalHeaderLabels([f"{h}:00" for h in range(0, 24)])
 
-        # Text negru pentru header-ele orizontale
-        for i in range(self.columnCount()):
-            self.horizontalHeaderItem(i).setForeground(QColor(0, 0, 0))
-
-        # Text negru pentru header-ele verticale
-        for i in range(self.rowCount()):
-            self.verticalHeaderItem(i).setForeground(QColor(0, 0, 0))
-
-        # Header orizontal
-        for i in range(self.columnCount()):
-            header_item = self.horizontalHeaderItem(i)
-            header_item.setForeground(QColor(0, 0, 0))  # text negru
-            header_item.setBackground(QColor(200, 200, 255))  # fundal albastru deschis
-
-        # Header vertical
-        for i in range(self.rowCount()):
-            header_item = self.verticalHeaderItem(i)
-            header_item.setForeground(QColor(0, 0, 0))  # text negru
-            header_item.setBackground(QColor(200, 200, 255))  # fundal albastru deschis
-
-
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            posf = event.position()  # QPointF
+            p = posf.toPoint()  # QPoint pentru itemAt/rowAt/columnAt
+            item = self.itemAt(p)
+            if item is not None:
+                y = posf.y()
+                near_top, near_bottom = self._is_near_vertical_edge(item, y)
+                if near_top or near_bottom:
+                    self._begin_resize(item, 'top' if near_top else 'bottom')
+                    return  # stop: suntem in mod resize
+            # altfel: drag normal
+            self.dragStartPosition = p  # stocăm QPoint
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -74,9 +58,11 @@ class ScheduleTable(QTableWidget):
             return
 
         # feedback vizual cursor pe margini
-        item = self.itemAt(event.pos())
+        posf = event.position()
+        p = posf.toPoint()
+        item = self.itemAt(p)
         if item is not None:
-            self._update_edge_cursor(item, event.position().y())
+            self._update_edge_cursor(item, posf.y())
         else:
             self.viewport().unsetCursor()
 
@@ -85,7 +71,7 @@ class ScheduleTable(QTableWidget):
             return
         if not self.dragStartPosition:
             return
-        if (event.position().toPoint() - self.dragStartPosition).manhattanLength() < QApplication.startDragDistance():
+        if (p - self.dragStartPosition).manhattanLength() < QApplication.startDragDistance():
             return
 
         item = self.itemAt(self.dragStartPosition)
@@ -103,7 +89,6 @@ class ScheduleTable(QTableWidget):
         drag.setMimeData(mimeData)
 
         result = drag.exec(Qt.MoveAction)
-
         if result == Qt.MoveAction:
             if self._last_drop_target != (src_row, src_col):
                 self.setSpan(src_row, src_col, 1, 1)
@@ -118,9 +103,13 @@ class ScheduleTable(QTableWidget):
 
     def mouseDoubleClickEvent(self, event):
         # Adauga un eveniment prin dublu click.
-        item = self.itemAt(event.position().toPoint())
-        row = self.rowAt(event.position().toPoint().y())
-        col = self.columnAt(event.position().toPoint().x())
+        import random
+        posf = event.position()  # QPointF
+        p = posf.toPoint()  # QPoint
+
+        item = self.itemAt(p)
+        row = self.rowAt(p.y())
+        col = self.columnAt(p.x())
         if row < 0 or col < 0:
             return
 
@@ -129,8 +118,10 @@ class ScheduleTable(QTableWidget):
             if ok and text.strip():
                 new_item = QTableWidgetItem(text.strip())
                 new_item.setTextAlignment(Qt.AlignCenter)
-                new_item.setBackground(Qt.yellow)
-                new_item.setForeground(QColor(0, 0, 0))  # text negru
+                random_color = QColor(random.randint(100, 255),
+                                      random.randint(100, 255),
+                                      random.randint(100, 255))
+                new_item.setBackground(random_color)
                 self.setItem(row, col, new_item)
 
     def dragEnterEvent(self, event):
@@ -139,25 +130,26 @@ class ScheduleTable(QTableWidget):
     def dragMoveEvent(self, event):
         event.acceptProposedAction()
 
-
-
     def dropEvent(self, event):
-        """Mută evenimentul în altă celulă, dar nu permite suprascrierea."""
+        """Mută evenimentul în altă celulă, păstrând durata (span)."""
         pos = event.position().toPoint()
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
         if row < 0 or col < 0:
             return
 
-        # Verificăm dacă celula este deja ocupată
-        if self.item(row, col) is not None and self.item(row, col).text():
-            # Popup de avertizare
-            QMessageBox.warning(self, "Celulă ocupată",
-                                "Această celulă este deja ocupată! Nu poți muta aici evenimentul.")
-            event.ignore()
-            return
+        raw_text = event.mimeData().text() or ""
+        if "|" in raw_text:
+            try:
+                span_str, text = raw_text.split("|", 1)
+                span_len = max(1, int(span_str))
+            except ValueError:
+                text = raw_text
+                span_len = 1
+        else:
+            text = raw_text
+            span_len = 1
 
-        text = event.mimeData().text()
         color = event.mimeData().colorData()
 
         if row + span_len > self.rowCount():
@@ -170,7 +162,6 @@ class ScheduleTable(QTableWidget):
             new_item = QTableWidgetItem(text)
             new_item.setTextAlignment(Qt.AlignCenter)
             new_item.setBackground(color if color else Qt.yellow)
-            new_item.setForeground(QColor(0, 0, 0))  # text negru
             self.setItem(row, col, new_item)
 
             self.setSpan(row, col, span_len, 1)
@@ -265,7 +256,6 @@ class ScheduleTable(QTableWidget):
             self.viewport().setCursor(Qt.CursorShape.SizeVerCursor)
         else:
             self.viewport().unsetCursor()
-
 
 
 class MainWindow(QMainWindow):
