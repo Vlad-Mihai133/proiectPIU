@@ -1,11 +1,11 @@
+import json
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QHBoxLayout, QTableWidget, QTableWidgetItem, QInputDialog
-)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, QTableWidget, QTableWidgetItem,
+                               QInputDialog, QMessageBox, QToolBar, QFileDialog)
 from PySide6.QtCore import Qt, QMimeData, QPoint
-from PySide6.QtGui import QDrag, QMouseEvent, QColor
+from PySide6.QtGui import QDrag, QMouseEvent, QColor, QAction
 
 
 # === Nou: model simplu pentru evenimente ===
@@ -156,7 +156,6 @@ class ScheduleTable(QTableWidget):
         event.acceptProposedAction()
 
     def dropEvent(self, event):
-        """Mută evenimentul; dacă suprapune peste altul, cel de sus va fi micșorat."""
         pos = event.position().toPoint()
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
@@ -177,59 +176,67 @@ class ScheduleTable(QTableWidget):
 
         color = event.mimeData().colorData()
 
-        # cap la limite
         if row + span_len > self.rowCount():
             row = max(0, self.rowCount() - span_len)
 
-        # --- Nou: detectează overlap și micșorează DOAR intersecția ---
+        # Detect overlap
         overlapped, overlap_len, top_is_new = self._overlap_info(row, span_len, col)
         if overlapped is not None and overlap_len > 0:
-            if top_is_new:
-                # Evenimentul DROP-uit e 'de sus' => micșorează-l pe acesta cu exact overlap_len
-                span_len = max(1, span_len - overlap_len)
-                # Reajustează dacă depășește finalul după micșorare (de obicei nu e cazul)
-                if row + span_len > self.rowCount():
-                    row = max(0, self.rowCount() - span_len)
+
+            if self._dragging_src == (overlapped.start_row, overlapped.day_col):
+                # Same event moved: no popup, no shrink
+                pass
             else:
-                # Evenimentul EXISTENT e 'de sus' => micșorează-l pe acesta cu exact overlap_len
-                self._shrink_event_by(overlapped, overlap_len)
+                # Ask user if they want to apply shrink logic
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("Conflict detected")
+                msg.setText(f"Event '{text}' overlaps with '{overlapped.title}'.\nApply shrink adjustment?")
+                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                msg.button(QMessageBox.Yes).setText("Yes, adjust")
+                msg.button(QMessageBox.No).setText("No, cancel")
+                choice = msg.exec()
+
+                if choice == QMessageBox.No:
+                    event.ignore()
+                    return
+
+                # If Yes, apply original shrink logic
+                if top_is_new:
+                    span_len = max(1, span_len - overlap_len)
+                    if row + span_len > self.rowCount():
+                        row = max(0, self.rowCount() - span_len)
+                else:
+                    self._shrink_event_by(overlapped, overlap_len)
 
         self._last_drop_target = (row, col)
 
         if text:
-            # eliberează celula țintă (span 1x1) înainte de a plasa
             self.setSpan(row, col, 1, 1)
-
             new_item = QTableWidgetItem(text)
             new_item.setTextAlignment(Qt.AlignCenter)
             new_item.setBackground(color if color else Qt.yellow)
             self.setItem(row, col, new_item)
-
-            # setează span-ul final
             self.setSpan(row, col, span_len, 1)
 
-            # === sincronizează modelul CalendarEvent ===
-            if self._dragging_src is not None:
-                srow, scol = self._dragging_src
-                ev = self.events_by_pos.pop((srow, scol), None)
-            else:
-                ev = None
+        if self._dragging_src is not None:
+            srow, scol = self._dragging_src
+            ev = self.events_by_pos.pop((srow, scol), None)
+        else:
+            ev = None
 
-            if ev is None:
-                ev = CalendarEvent(
-                    title=text, start_row=row, day_col=col, duration=span_len,
-                    color=color if color else QColor(Qt.yellow)
-                )
-            else:
-                ev.title = text
-                ev.start_row = row
-                ev.day_col = col
-                ev.duration = span_len
-                if color:
-                    ev.color = color
+        if ev is None:
+            ev = CalendarEvent(title=text, start_row=row, day_col=col, duration=span_len,
+                               color=color if color else QColor(Qt.yellow))
+        else:
+            ev.title = text
+            ev.start_row = row
+            ev.day_col = col
+            ev.duration = span_len
+            if color:
+                ev.color = color
 
-            self.events_by_pos[(row, col)] = ev
-
+        self.events_by_pos[(row, col)] = ev
         event.acceptProposedAction()
 
     def _is_near_vertical_edge(self, item, y):
@@ -375,6 +382,49 @@ class ScheduleTable(QTableWidget):
         ev.duration = new_duration
         self.events_by_pos[(old_top, col)] = ev
 
+    def save_to_json(self, file_path: str):
+        data = []
+        for (row, col), ev in self.events_by_pos.items():
+            data.append({
+                "title": ev.title,
+                "start_row": ev.start_row,
+                "day_col": ev.day_col,
+                "duration": ev.duration,
+                "color": (ev.color.red(), ev.color.green(), ev.color.blue())
+            })
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+
+    def load_from_json(self, file_path: str):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+
+        # Curăță tabelul și modelul
+        self.clearContents()
+        self.events_by_pos.clear()
+
+        for ev_dict in data:
+            title = ev_dict.get("title", "")
+            start_row = ev_dict.get("start_row", 0)
+            day_col = ev_dict.get("day_col", 0)
+            duration = ev_dict.get("duration", 1)
+            color_tuple = ev_dict.get("color", (255, 255, 0))
+            color = QColor(*color_tuple)
+
+            # Creează item în tabel
+            item = QTableWidgetItem(title)
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setBackground(color)
+            self.setItem(start_row, day_col, item)
+            self.setSpan(start_row, day_col, duration, 1)
+
+            # Adaugă în model
+            ev = CalendarEvent(title=title, start_row=start_row, day_col=day_col, duration=duration, color=color)
+            self.events_by_pos[(start_row, day_col)] = ev
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -390,6 +440,27 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.schedule_table)
 
         self.setCentralWidget(central_widget)
+
+        toolbar = QToolBar("File")
+        self.addToolBar(toolbar)
+
+        save_action = QAction("Save", self)
+        save_action.triggered.connect(self.save_schedule)
+        toolbar.addAction(save_action)
+
+        load_action = QAction("Load", self)
+        load_action.triggered.connect(self.load_schedule)
+        toolbar.addAction(load_action)
+
+    def save_schedule(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Salvează orarul", "", "JSON Files (*.json)")
+        if file_path:
+            self.schedule_table.save_to_json(file_path)
+
+    def load_schedule(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Încarcă orarul", "", "JSON Files (*.json)")
+        if file_path:
+            self.schedule_table.load_from_json(file_path)
 
 
 if __name__ == "__main__":
