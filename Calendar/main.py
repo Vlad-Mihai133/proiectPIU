@@ -201,14 +201,30 @@ class ScheduleTable(QTableWidget):
                     event.ignore()
                     return
 
-                # If Yes, apply original shrink logic
-                if top_is_new:
-                    span_len = max(1, span_len - overlap_len)
-                    if row + span_len > self.rowCount():
-                        row = max(0, self.rowCount() - span_len)
-                else:
-                    self._shrink_event_by(overlapped, overlap_len)
+                new_start = row
+                new_end = row + max(1, span_len) - 1
+                ev_start = overlapped.start_row
+                ev_end = overlapped.start_row + overlapped.duration - 1
 
+                # 1) new event completely inside first event
+                if new_start > ev_start and new_end < ev_end:
+                    self._split_event_middle(overlapped, new_start, new_end)
+
+                # 2) new event above first event
+                elif new_start <= ev_start <= new_end < ev_end:
+                    cut = new_end - ev_start + 1
+                    self._shrink_event_from_top(overlapped, cut)
+
+                # 3) new event below first event
+                elif ev_start < new_start <= ev_end <= new_end:
+                    cut = ev_end - new_start + 1
+                    self._shrink_event_by(overlapped, cut)
+
+                # 4) new event overrides first event
+                elif new_start <= ev_start and new_end >= ev_end:
+                    self.setSpan(ev_start, col, 1, 1)
+                    self.takeItem(ev_start, col)
+                    self.events_by_pos.pop((ev_start, col), None)
         self._last_drop_target = (row, col)
 
         if text:
@@ -381,6 +397,103 @@ class ScheduleTable(QTableWidget):
         # Actualizează modelul
         ev.duration = new_duration
         self.events_by_pos[(old_top, col)] = ev
+
+    def _shrink_event_from_top(self, ev: CalendarEvent, cut: int):
+        """
+        Taie 'cut' rânduri din PARTEA DE SUS a evenimentului 'ev'.
+        Mută start_row în jos și actualizează UI + model.
+        """
+        if cut <= 0:
+            return
+
+        old_start = ev.start_row
+        col = ev.day_col
+        old_duration = ev.duration
+        ev_end = old_start + old_duration - 1
+
+        new_duration = max(0, old_duration - cut)
+        if new_duration <= 0:
+            # Evenimentul dispare complet
+            self.setSpan(old_start, col, 1, 1)
+            self.takeItem(old_start, col)
+            self.events_by_pos.pop((old_start, col), None)
+            return
+
+        new_start = old_start + cut
+
+        # Luăm item-ul original
+        item = self.item(old_start, col)
+        if item is None:
+            return
+
+        # Resetăm span-ul vechi
+        self.setSpan(old_start, col, 1, 1)
+        self.takeItem(old_start, col)
+
+        # Punem item-ul la noul start și setăm span-ul nou
+        self.setItem(new_start, col, item)
+        self.setSpan(new_start, col, new_duration, 1)
+
+        # Actualizăm modelul
+        self.events_by_pos.pop((old_start, col), None)
+        ev.start_row = new_start
+        ev.duration = new_duration
+        self.events_by_pos[(new_start, col)] = ev
+
+    def _split_event_middle(self, ev: CalendarEvent, new_start: int, new_end: int):
+        """
+        Sparge evenimentul 'ev' în două părți în jurul intervalului [new_start, new_end],
+        păstrând titlul și culoarea. Partea de sus rămâne în 'ev', partea de jos devine
+        un nou CalendarEvent.
+        """
+        ev_start = ev.start_row
+        ev_end = ev.start_row + ev.duration - 1
+        col = ev.day_col
+
+        if not (ev_start < new_start <= new_end < ev_end):
+            return
+
+        duration_top = new_start - ev_start
+        duration_bottom = ev_end - new_end
+
+        if duration_top < 0 or duration_bottom < 0:
+            return
+
+        orig_item = self.item(ev_start, col)
+        if orig_item is None:
+            return
+
+        self.setSpan(ev_start, col, 1, 1)
+
+        self.events_by_pos.pop((ev_start, col), None)
+
+        if duration_top > 0:
+            self.setItem(ev_start, col, orig_item)
+            self.setSpan(ev_start, col, duration_top, 1)
+
+            ev.start_row = ev_start
+            ev.duration = duration_top
+            self.events_by_pos[(ev_start, col)] = ev
+        else:
+            orig_item = None
+
+        if duration_bottom > 0:
+            bottom_start = new_end + 1
+
+            item_bottom = QTableWidgetItem(ev.title)
+            item_bottom.setTextAlignment(Qt.AlignCenter)
+            item_bottom.setBackground(ev.color)
+            self.setItem(bottom_start, col, item_bottom)
+            self.setSpan(bottom_start, col, duration_bottom, 1)
+
+            ev_bottom = CalendarEvent(
+                title=ev.title,
+                start_row=bottom_start,
+                day_col=col,
+                duration=duration_bottom,
+                color=ev.color
+            )
+            self.events_by_pos[(bottom_start, col)] = ev_bottom
 
     def save_to_json(self, file_path: str):
         data = []
