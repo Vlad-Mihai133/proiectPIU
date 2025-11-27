@@ -16,6 +16,7 @@ from models import CalendarEvent
 
 class ScheduleTable(QTableWidget):
     def __init__(self, rows: int, cols: int):
+        """Initializează tabelul de program și modelul intern de evenimente."""
         super().__init__(rows, cols)
         self.dragStartPosition: Optional[Qt.QPoint] = None
         self.setAcceptDrops(True)
@@ -25,10 +26,9 @@ class ScheduleTable(QTableWidget):
         self.setDropIndicatorShown(True)
         self.setDragEnabled(True)
 
-        # pt resize
         self.setMouseTracking(True)
         self._resize_active = False
-        self._resize_edge = None  # 'top' sau 'bottom'
+        self._resize_edge = None
         self._resize_anchor_row = None
         self._resize_col = None
         self._resize_margin_px = 6
@@ -36,12 +36,9 @@ class ScheduleTable(QTableWidget):
         self._span_len = 1
         self._last_drop_target = None
 
-        # === Model evenimente ===
-        # Cheie: (row, col) al rândului de START (top) al evenimentului
         self.events_by_pos: Dict[Tuple[int, int], CalendarEvent] = {}
         self._dragging_src: Optional[Tuple[int, int]] = None
 
-        # Configurare tabel
         for row in range(rows):
             self.setRowHeight(row, 40)
         for col in range(cols):
@@ -56,6 +53,7 @@ class ScheduleTable(QTableWidget):
     # ===================== Interacțiuni mouse / drag =====================
 
     def mousePressEvent(self, event: QMouseEvent):
+        """Gestionează apăsarea mouse-ului: pregătește resize sau drag pentru un eveniment."""
         if event.button() == Qt.MouseButton.LeftButton:
             posf = event.position()
             p = posf.toPoint()
@@ -65,17 +63,16 @@ class ScheduleTable(QTableWidget):
                 near_top, near_bottom = self._is_near_vertical_edge(item, y)
                 if near_top or near_bottom:
                     self._begin_resize(item, 'top' if near_top else 'bottom')
-                    return  # suntem în mod resize
-            # altfel: drag normal
+                    return
             self.dragStartPosition = p
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        """Gestionează mișcarea mouse-ului: actualizează resize sau pornește drag-ul unui eveniment."""
         if self._resize_active:
             self._update_resize(self.rowAt(event.position().toPoint().y()))
             return
 
-        # feedback vizual cursor pe margini
         posf = event.position()
         p = posf.toPoint()
         item = self.itemAt(p)
@@ -84,7 +81,6 @@ class ScheduleTable(QTableWidget):
         else:
             self.viewport().unsetCursor()
 
-        # flux drag
         if not (event.buttons() & Qt.LeftButton):
             return
         if not self.dragStartPosition:
@@ -100,7 +96,6 @@ class ScheduleTable(QTableWidget):
         src_col = self.column(item)
         span_len = max(1, self.rowSpan(src_row, src_col))
 
-        # memorează sursa pentru a muta modelul la drop
         self._dragging_src = (src_row, src_col)
 
         drag = QDrag(self)
@@ -118,13 +113,14 @@ class ScheduleTable(QTableWidget):
             self._dragging_src = None
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        """Încheie operațiunile de resize la eliberarea butonului de mouse."""
         if event.button() == Qt.MouseButton.LeftButton and self._resize_active:
             self._end_resize()
             return
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        # Adauga un eveniment prin dublu click.
+        """Creează un eveniment nou la dublu-click pe o celulă liberă."""
         import random
         posf = event.position()
         p = posf.toPoint()
@@ -147,7 +143,6 @@ class ScheduleTable(QTableWidget):
                 )
                 new_item.setBackground(random_color)
                 self.setItem(row, col, new_item)
-                # salvează în model
                 self.events_by_pos[(row, col)] = CalendarEvent(
                     title=text.strip(), start_row=row, day_col=col,
                     duration=1, color=random_color
@@ -156,12 +151,15 @@ class ScheduleTable(QTableWidget):
     # ===================== Drag & drop =====================
 
     def dragEnterEvent(self, event):
+        """Acceptă intrarea unui drag în tabel."""
         event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
+        """Acceptă mișcarea unui drag deasupra tabelului."""
         event.acceptProposedAction()
 
     def dropEvent(self, event):
+        """Gestionează logica de drop: mutare eveniment existent sau creare nou eveniment și rezolvarea conflictelor."""
         pos = event.position().toPoint()
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
@@ -182,22 +180,38 @@ class ScheduleTable(QTableWidget):
 
         color = event.mimeData().colorData()
 
-        if row + span_len > self.rowCount():
-            row = max(0, self.rowCount() - span_len)
+        original_ev = None
+        if self._dragging_src is not None:
+            src_row, src_col = self._dragging_src
+            original_ev = self.events_by_pos.get((src_row, src_col))
 
-        # Detect overlap
-        overlapped, overlap_len, top_is_new = self._overlap_info(row, span_len, col)
-        if overlapped is not None and overlap_len > 0:
-            if self._dragging_src == (overlapped.start_row, overlapped.day_col):
-                # Same event moved: no popup, no shrink
-                pass
-            else:
-                # conflict, întreabă utilizatorul
+        if original_ev is not None:
+            """Mută un eveniment existent, ajustând doar evenimentele cu care intră în conflict."""
+            duration = original_ev.duration
+
+            if row + duration > self.rowCount():
+                row = max(0, self.rowCount() - duration)
+
+            new_start = row
+            new_end = row + duration - 1
+
+            conflicts = []
+            for (erow, ecol), ev in list(self.events_by_pos.items()):
+                if ev is original_ev:
+                    continue
+                if ecol != col:
+                    continue
+                ev_start = ev.start_row
+                ev_end = ev.start_row + ev.duration - 1
+                if self._intervals_overlap(new_start, new_end, ev_start, ev_end):
+                    conflicts.append(ev)
+
+            if conflicts:
                 msg = QMessageBox(self)
                 msg.setIcon(QMessageBox.Warning)
                 msg.setWindowTitle("Conflict detected")
                 msg.setText(
-                    f"Event '{text}' overlaps with '{overlapped.title}'.\nApply shrink adjustment?"
+                    f"Event '{original_ev.title}' overlaps with {len(conflicts)} event(s).\nApply shrink adjustment?"
                 )
                 msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
                 msg.button(QMessageBox.Yes).setText("Yes, adjust")
@@ -208,72 +222,108 @@ class ScheduleTable(QTableWidget):
                     event.ignore()
                     return
 
-                # --- Aici avem noua logică: ajustăm întotdeauna evenimentul EXISTENT (cel dedesubt) ---
-                new_start = row
-                new_end = row + max(1, span_len) - 1
+                for overlapped in conflicts:
+                    ev_start = overlapped.start_row
+                    ev_end = overlapped.start_row + overlapped.duration - 1
+
+                    if new_start > ev_start and new_end < ev_end:
+                        self._split_event_middle(overlapped, new_start, new_end)
+                    elif new_start <= ev_start <= new_end < ev_end:
+                        cut = new_end - ev_start + 1
+                        self._shrink_event_from_top(overlapped, cut)
+                    elif ev_start < new_start <= ev_end <= new_end:
+                        cut = ev_end - new_start + 1
+                        self._shrink_event_by(overlapped, cut)
+                    elif new_start <= ev_start and new_end >= ev_end:
+                        self.setSpan(ev_start, overlapped.day_col, 1, 1)
+                        self.takeItem(ev_start, overlapped.day_col)
+                        self.events_by_pos.pop((ev_start, overlapped.day_col), None)
+
+            old_start = original_ev.start_row
+            old_col = original_ev.day_col
+
+            item = self.item(old_start, old_col)
+            if item is not None:
+                self.setSpan(old_start, old_col, 1, 1)
+                self.takeItem(old_start, old_col)
+
+                self.setItem(new_start, col, item)
+                self.setSpan(new_start, col, duration, 1)
+
+            self.events_by_pos.pop((old_start, old_col), None)
+            original_ev.start_row = new_start
+            original_ev.day_col = col
+            original_ev.duration = duration
+            self.events_by_pos[(new_start, col)] = original_ev
+
+            self._last_drop_target = (new_start, col)
+            self._dragging_src = None
+            event.acceptProposedAction()
+            return
+
+        """Creează sau plasează un eveniment nou, ajustând evenimentele existente dacă se suprapune."""
+        if row + span_len > self.rowCount():
+            row = max(0, self.rowCount() - span_len)
+
+        overlaps = self._find_overlaps(row, span_len, col)
+        if overlaps:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Conflict detected")
+            msg.setText(
+                f"Event '{text}' overlaps with {len(overlaps)} event(s).\nApply shrink adjustment?"
+            )
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.button(QMessageBox.Yes).setText("Yes, adjust")
+            msg.button(QMessageBox.No).setText("No, cancel")
+            choice = msg.exec()
+
+            if choice == QMessageBox.No:
+                event.ignore()
+                return
+
+            new_start = row
+            new_end = row + max(1, span_len) - 1
+            for overlapped in overlaps:
                 ev_start = overlapped.start_row
                 ev_end = overlapped.start_row + overlapped.duration - 1
 
-                # 1) Noul eveniment e complet în interiorul celui existent => split în două (sus + jos)
                 if new_start > ev_start and new_end < ev_end:
                     self._split_event_middle(overlapped, new_start, new_end)
-
-                # 2) Noul eveniment intră peste PARTEA DE SUS a celui existent
                 elif new_start <= ev_start <= new_end < ev_end:
                     cut = new_end - ev_start + 1
                     self._shrink_event_from_top(overlapped, cut)
-
-                # 3) Noul eveniment intră peste PARTEA DE JOS a celui existent
                 elif ev_start < new_start <= ev_end <= new_end:
                     cut = ev_end - new_start + 1
                     self._shrink_event_by(overlapped, cut)
-
-                # 4) Noul eveniment acoperă complet evenimentul existent
                 elif new_start <= ev_start and new_end >= ev_end:
-                    self.setSpan(ev_start, col, 1, 1)
-                    self.takeItem(ev_start, col)
-                    self.events_by_pos.pop((ev_start, col), None)
-                # alte cazuri exotice -> ignorăm, nu ajustăm
+                    self.setSpan(ev_start, overlapped.day_col, 1, 1)
+                    self.takeItem(ev_start, overlapped.day_col)
+                    self.events_by_pos.pop((ev_start, overlapped.day_col), None)
 
         self._last_drop_target = (row, col)
 
         if text:
-            self.setSpan(row, col, 1, 1)
             new_item = QTableWidgetItem(text)
             new_item.setTextAlignment(Qt.AlignCenter)
             new_item.setBackground(color if color else Qt.yellow)
             self.setItem(row, col, new_item)
             self.setSpan(row, col, span_len, 1)
 
-        # mutăm modelul
-        if self._dragging_src is not None:
-            srow, scol = self._dragging_src
-            ev = self.events_by_pos.pop((srow, scol), None)
-        else:
-            ev = None
-
-        if ev is None:
-            ev = CalendarEvent(
-                title=text,
-                start_row=row,
-                day_col=col,
-                duration=span_len,
-                color=color if color else QColor(Qt.yellow)
-            )
-        else:
-            ev.title = text
-            ev.start_row = row
-            ev.day_col = col
-            ev.duration = span_len
-            if color:
-                ev.color = color
-
+        ev = CalendarEvent(
+            title=text,
+            start_row=row,
+            day_col=col,
+            duration=span_len,
+            color=color if color else QColor(Qt.yellow)
+        )
         self.events_by_pos[(row, col)] = ev
         event.acceptProposedAction()
 
     # ===================== Resize logic =====================
 
     def _is_near_vertical_edge(self, item: QTableWidgetItem, y: float):
+        """Verifică dacă poziția y este aproape de marginea verticală a unui item (sus sau jos)."""
         rect = self.visualItemRect(item)
         return (
             abs(y - rect.top()) <= self._resize_margin_px,
@@ -281,6 +331,7 @@ class ScheduleTable(QTableWidget):
         )
 
     def _begin_resize(self, item: QTableWidgetItem, edge: str):
+        """Pornește modul de resize pentru un eveniment, setând ancora și direcția (sus/jos)."""
         self._resize_active = True
         self._resize_edge = edge
         row = self.row(item)
@@ -295,6 +346,7 @@ class ScheduleTable(QTableWidget):
         self._span_len = span
 
     def _compute_span(self, anchor_row: int, target_row: int, edge: str):
+        """Calculează noul start și noua lungime de span în funcție de anchor și poziția target."""
         if edge == 'bottom':
             start_row = anchor_row
             end_row = max(target_row, start_row)
@@ -305,6 +357,7 @@ class ScheduleTable(QTableWidget):
         return start_row, new_span
 
     def _ensure_item_at(self, start_row: int, col: int):
+        """Se asigură că există un item la (start_row, col), mutându-l dacă este necesar."""
         item = self.item(start_row, col)
         if item is not None:
             return item
@@ -316,12 +369,33 @@ class ScheduleTable(QTableWidget):
         return None
 
     def _update_resize(self, target_row: int):
+        """Actualizează vizual și în model redimensionarea unui eveniment în timpul drag-ului."""
         if target_row < 0:
             return
 
         start_row, new_span = self._compute_span(
             self._resize_anchor_row, target_row, self._resize_edge
         )
+        if self._resize_edge == 'bottom':
+            limit = self._nearest_blocking_event(
+                self._span_top_row,
+                start_row + new_span - 1,
+                self._resize_col,
+                'bottom'
+            )
+            if limit is not None:
+                new_span = max(1, limit - self._span_top_row + 1)
+
+        else:
+            limit = self._nearest_blocking_event(
+                start_row,
+                self._span_top_row + self._span_len - 1,
+                self._resize_col,
+                'top'
+            )
+            if limit is not None:
+                start_row = limit
+                new_span = (self._span_top_row + self._span_len) - start_row
 
         if self._span_top_row is not None:
             old_top = self._span_top_row
@@ -347,7 +421,6 @@ class ScheduleTable(QTableWidget):
 
             self.setSpan(start_row, self._resize_col, new_span, 1)
 
-            # sincronizează modelul cu noua poziție
             if ev is not None:
                 ev.start_row = start_row
                 ev.day_col = old_col
@@ -358,6 +431,7 @@ class ScheduleTable(QTableWidget):
         self._span_len = new_span
 
     def _end_resize(self):
+        """Finalizează operația de resize și resetează starea internă."""
         self._resize_active = False
         self._resize_edge = None
         self._resize_anchor_row = None
@@ -367,6 +441,7 @@ class ScheduleTable(QTableWidget):
         self.viewport().unsetCursor()
 
     def _update_edge_cursor(self, item: QTableWidgetItem, y: float):
+        """Actualizează cursorul pentru a indica posibilitatea de resize la marginea unui eveniment."""
         near_top, near_bottom = self._is_near_vertical_edge(item, y)
         if near_top or near_bottom:
             self.viewport().setCursor(Qt.CursorShape.SizeVerCursor)
@@ -375,11 +450,12 @@ class ScheduleTable(QTableWidget):
 
     # ===================== Overlap & ajustare evenimente =====================
 
+    def _intervals_overlap(self, a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+        """Verifică dacă două intervale [a_start, a_end] și [b_start, b_end] se suprapun."""
+        return not (a_end < b_start or a_start > b_end)
+
     def _overlap_info(self, start_row: int, span_len: int, col: int):
-        """
-        Returnează (ev, overlap_len, top_is_new) sau (None, 0, False) dacă nu e overlap.
-        top_is_new = True dacă evenimentul NOU (drop) e 'de sus' (are start_row mai mic).
-        """
+        """Returnează primul eveniment care se suprapune cu intervalul dat și informații despre overlap."""
         new_start = start_row
         new_end = start_row + max(1, span_len) - 1
         for (srow, scol), ev in self.events_by_pos.items():
@@ -393,11 +469,27 @@ class ScheduleTable(QTableWidget):
                 return ev, overlap_len, top_is_new
         return None, 0, False
 
+    def _find_overlaps(self, start_row: int, span_len: int, col: int):
+        """Returnează toate evenimentele care se suprapun cu intervalul dat pe o coloană, ordonate de sus în jos."""
+        overlaps = []
+        new_start = start_row
+        new_end = start_row + max(1, span_len) - 1
+
+        for (srow, scol), ev in self.events_by_pos.items():
+            if scol != col:
+                continue
+            if self._dragging_src is not None and (srow, scol) == self._dragging_src:
+                continue
+            ev_start = ev.start_row
+            ev_end = ev.start_row + ev.duration - 1
+            if not (new_end < ev_start or new_start > ev_end):
+                overlaps.append(ev)
+
+        overlaps.sort(key=lambda e: e.start_row)
+        return overlaps
+
     def _shrink_event_by(self, ev: CalendarEvent, cut: int):
-        """
-        Reduce durata evenimentului 'ev' cu 'cut' rânduri (min 1), tăind din partea de jos.
-        Sincronizează UI + model.
-        """
+        """Micșorează un eveniment din partea de jos cu 'cut' rânduri și actualizează UI + model."""
         if cut <= 0:
             return
         old_top = ev.start_row
@@ -413,10 +505,7 @@ class ScheduleTable(QTableWidget):
         self.events_by_pos[(old_top, col)] = ev
 
     def _shrink_event_from_top(self, ev: CalendarEvent, cut: int):
-        """
-        Taie 'cut' rânduri din PARTEA DE SUS a evenimentului 'ev'.
-        Mută start_row în jos și actualizează UI + model.
-        """
+        """Micșorează un eveniment din partea de sus cu 'cut' rânduri și mută start_row-ul în jos."""
         if cut <= 0:
             return
 
@@ -426,7 +515,6 @@ class ScheduleTable(QTableWidget):
 
         new_duration = max(0, old_duration - cut)
         if new_duration <= 0:
-            # Evenimentul dispare complet
             self.setSpan(old_start, col, 1, 1)
             self.takeItem(old_start, col)
             self.events_by_pos.pop((old_start, col), None)
@@ -450,11 +538,7 @@ class ScheduleTable(QTableWidget):
         self.events_by_pos[(new_start, col)] = ev
 
     def _split_event_middle(self, ev: CalendarEvent, new_start: int, new_end: int):
-        """
-        Sparge evenimentul 'ev' în două părți în jurul intervalului [new_start, new_end],
-        păstrând titlul și culoarea. Partea de sus rămâne în 'ev', partea de jos devine
-        un nou CalendarEvent.
-        """
+        """Împarte un eveniment în două părți, separând intervalul [new_start, new_end] din mijloc."""
         ev_start = ev.start_row
         ev_end = ev.start_row + ev.duration - 1
         col = ev.day_col
@@ -475,7 +559,6 @@ class ScheduleTable(QTableWidget):
         self.setSpan(ev_start, col, 1, 1)
         self.events_by_pos.pop((ev_start, col), None)
 
-        # partea de sus
         if duration_top > 0:
             self.setItem(ev_start, col, orig_item)
             self.setSpan(ev_start, col, duration_top, 1)
@@ -486,7 +569,6 @@ class ScheduleTable(QTableWidget):
         else:
             orig_item = None
 
-        # partea de jos
         if duration_bottom > 0:
             bottom_start = new_end + 1
 
@@ -505,16 +587,35 @@ class ScheduleTable(QTableWidget):
             )
             self.events_by_pos[(bottom_start, col)] = ev_bottom
 
+    # ===================== Constrangeri ======================
+
+    def _nearest_blocking_event(self, start_row: int, end_row: int, col: int, edge: str):
+        """Găsește cel mai apropiat eveniment care blochează extinderea resize-ului în sus sau în jos."""
+        for (srow, scol), ev in self.events_by_pos.items():
+            if scol != col:
+                continue
+
+            ev_start = ev.start_row
+            ev_end = ev.start_row + ev.duration - 1
+
+            if (ev_start == start_row and ev_end == end_row):
+                continue
+
+            if edge == 'bottom':
+                if ev_start > start_row and ev_start <= end_row:
+                    return ev_start - 1
+            else:
+                if ev_end < end_row and ev_end >= start_row:
+                    return ev_end + 1
+
+        return None
+
     # ===================== Salvare / load =====================
 
     def reset_table(self):
-        """
-        Resetează complet conținutul: șterge item-urile, span-urile
-        și modelul de evenimente.
-        """
+        """Curăță complet tabelul și modelul de evenimente (item-uri, span-uri, structură internă)."""
         for r in range(self.rowCount()):
             for c in range(self.columnCount()):
-                # dacă există span-uri vechi, le resetăm la 1x1
                 if self.rowSpan(r, c) != 1 or self.columnSpan(r, c) != 1:
                     self.setSpan(r, c, 1, 1)
                 item = self.item(r, c)
@@ -524,6 +625,7 @@ class ScheduleTable(QTableWidget):
         self.events_by_pos.clear()
 
     def save_to_json(self, file_path: str):
+        """Salvează toate evenimentele din model într-un fișier JSON."""
         data = []
         for (row, col), ev in self.events_by_pos.items():
             data.append({
@@ -537,13 +639,13 @@ class ScheduleTable(QTableWidget):
             json.dump(data, f, indent=4)
 
     def load_from_json(self, file_path: str):
+        """Încarcă evenimentele dintr-un fișier JSON și reconstruiește tabelul și modelul."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except FileNotFoundError:
             return
 
-        # folosim reset_table ca să curățăm și span-urile vechi
         self.reset_table()
 
         for ev_dict in data:
