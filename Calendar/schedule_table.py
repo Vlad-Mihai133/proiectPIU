@@ -106,7 +106,7 @@ class ScheduleTable(QTableWidget):
 
         result = drag.exec(Qt.MoveAction)
         if result == Qt.MoveAction:
-            if self._last_drop_target != (src_row, src_col):
+            if self._last_drop_target is not None and self._last_drop_target != (src_row, src_col):
                 self.setSpan(src_row, src_col, 1, 1)
                 self.takeItem(src_row, src_col)
             self._last_drop_target = None
@@ -163,7 +163,9 @@ class ScheduleTable(QTableWidget):
         pos = event.position().toPoint()
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
-        if row < 0 or col < 0:
+        if not self._constraint_inside_window(row, col):
+            self._last_drop_target = None
+            event.ignore()
             return
 
         raw_text = event.mimeData().text() or ""
@@ -187,7 +189,10 @@ class ScheduleTable(QTableWidget):
 
         if original_ev is not None:
             """Mută un eveniment existent, ajustând doar evenimentele cu care intră în conflict."""
+            col = self._constraint_same_day_column(original_ev, col)
+
             duration = original_ev.duration
+            row, duration = self._constraint_within_day(row, duration)
 
             if row + duration > self.rowCount():
                 row = max(0, self.rowCount() - duration)
@@ -262,8 +267,7 @@ class ScheduleTable(QTableWidget):
             return
 
         """Creează sau plasează un eveniment nou, ajustând evenimentele existente dacă se suprapune."""
-        if row + span_len > self.rowCount():
-            row = max(0, self.rowCount() - span_len)
+        row, span_len = self._constraint_within_day(row, span_len)
 
         overlaps = self._find_overlaps(row, span_len, col)
         if overlaps:
@@ -396,6 +400,8 @@ class ScheduleTable(QTableWidget):
             if limit is not None:
                 start_row = limit
                 new_span = (self._span_top_row + self._span_len) - start_row
+
+        start_row, new_span = self._constraint_within_day(start_row, new_span)
 
         if self._span_top_row is not None:
             old_top = self._span_top_row
@@ -609,6 +615,40 @@ class ScheduleTable(QTableWidget):
                     return ev_end + 1
 
         return None
+
+    def _constraint_same_day_column(self, original_ev: CalendarEvent, drop_col: int) -> int:
+        """
+        Constrângere: un eveniment nu poate fi mutat pe altă zi.
+        Întoarce mereu coloana din ziua originală a evenimentului, ignorând coloana target.
+        """
+        if original_ev is None:
+            return drop_col
+        return original_ev.day_col
+
+    def _constraint_within_day(self, start_row: int, duration: int) -> Tuple[int, int]:
+        """
+        Constrângere: limitează start_row și durata astfel încât evenimentul să rămână în intervalul [0, rowCount-1].
+        Ajustează start_row și duration dacă ar ieși în afara zilei.
+        """
+        if self.rowCount() <= 0:
+            return 0, 0
+
+        # clamp start_row în [0, rowCount-1]
+        start_row = max(0, min(start_row, self.rowCount() - 1))
+
+        # dacă start_row + duration depășește ultima oră, scurtăm durata
+        max_duration = self.rowCount() - start_row
+        duration = max(1, min(duration, max_duration))
+
+        return start_row, duration
+
+    def _constraint_inside_window(self, row: int, col: int) -> bool:
+        """Constrângere: verifică dacă poziția (row, col) este în interiorul tabelului."""
+        if row < 0 or col < 0:
+            return False
+        if row >= self.rowCount() or col >= self.columnCount():
+            return False
+        return True
 
     # ===================== Salvare / load =====================
 
