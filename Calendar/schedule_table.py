@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QInputDialog,
     QMessageBox,
-    QApplication,
+    QApplication, QDialog,
 )
 from PySide6.QtCore import Qt, QMimeData
 from PySide6.QtGui import QDrag, QMouseEvent, QColor
 
 from models import CalendarEvent
+from event_dialog import EventEditDialog
 
 
 class ScheduleTable(QTableWidget):
@@ -120,33 +121,75 @@ class ScheduleTable(QTableWidget):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Creează un eveniment nou la dublu-click pe o celulă liberă."""
-        import random
+        """Deschide un dialog pentru a crea sau edita un eveniment (nume + descriere)."""
         posf = event.position()
         p = posf.toPoint()
 
-        item = self.itemAt(p)
         row = self.rowAt(p.y())
         col = self.columnAt(p.x())
         if row < 0 or col < 0:
             return
 
-        if item is None:
-            text, ok = QInputDialog.getText(self, "Add Event", "Event name:")
-            if ok and text.strip():
-                new_item = QTableWidgetItem(text.strip())
-                new_item.setTextAlignment(Qt.AlignCenter)
-                random_color = QColor(
-                    random.randint(100, 255),
-                    random.randint(100, 255),
-                    random.randint(100, 255)
-                )
-                new_item.setBackground(random_color)
-                self.setItem(row, col, new_item)
-                self.events_by_pos[(row, col)] = CalendarEvent(
-                    title=text.strip(), start_row=row, day_col=col,
-                    duration=1, color=random_color
-                )
+        existing_ev = None
+        top_row = row
+
+        direct_ev = self.events_by_pos.get((row, col))
+        if direct_ev is not None:
+            existing_ev = direct_ev
+            top_row = direct_ev.start_row
+        else:
+            for (srow, scol), ev in self.events_by_pos.items():
+                if scol != col:
+                    continue
+                if srow <= row < srow + ev.duration:
+                    existing_ev = ev
+                    top_row = srow
+                    break
+
+        item = self.item(top_row, col)
+
+        if existing_ev is not None and item is not None:
+            from event_dialog import EventEditDialog
+            dlg = EventEditDialog(
+                title=existing_ev.title,
+                description=getattr(existing_ev, "description", ""),
+                parent=self
+            )
+            if dlg.exec() == QDialog.Accepted:
+                new_title, new_desc = dlg.get_values()
+                if new_title:
+                    existing_ev.title = new_title
+                    if hasattr(existing_ev, "description"):
+                        existing_ev.description = new_desc
+                    item.setText(new_title)
+            return
+
+        from event_dialog import EventEditDialog
+        dlg = EventEditDialog(parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            new_title, new_desc = dlg.get_values()
+            if not new_title:
+                return
+
+            import random
+            new_item = QTableWidgetItem(new_title)
+            new_item.setTextAlignment(Qt.AlignCenter)
+            random_color = QColor(
+                random.randint(100, 255),
+                random.randint(100, 255),
+                random.randint(100, 255)
+            )
+            new_item.setBackground(random_color)
+            self.setItem(row, col, new_item)
+
+            self.events_by_pos[(row, col)] = CalendarEvent(
+                title=new_title,
+                start_row=row,
+                day_col=col,
+                duration=1,
+                color=random_color,
+                description=new_desc if hasattr(CalendarEvent, "description") else ""
+            )
 
     # ===================== Drag & drop =====================
 
@@ -589,7 +632,8 @@ class ScheduleTable(QTableWidget):
                 start_row=bottom_start,
                 day_col=col,
                 duration=duration_bottom,
-                color=ev.color
+                color=ev.color,
+                description=ev.description
             )
             self.events_by_pos[(bottom_start, col)] = ev_bottom
 
@@ -673,7 +717,8 @@ class ScheduleTable(QTableWidget):
                 "start_row": ev.start_row,
                 "day_col": ev.day_col,
                 "duration": ev.duration,
-                "color": (ev.color.red(), ev.color.green(), ev.color.blue())
+                "color": (ev.color.red(), ev.color.green(), ev.color.blue()),
+                "description": ev.description,
             })
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
@@ -694,6 +739,7 @@ class ScheduleTable(QTableWidget):
             day_col = ev_dict.get("day_col", 0)
             duration = ev_dict.get("duration", 1)
             color_tuple = ev_dict.get("color", (255, 255, 0))
+            description = ev_dict.get("description", "")
             color = QColor(*color_tuple)
 
             item = QTableWidgetItem(title)
@@ -707,6 +753,7 @@ class ScheduleTable(QTableWidget):
                 start_row=start_row,
                 day_col=day_col,
                 duration=duration,
-                color=color
+                color=color,
+                description=description
             )
             self.events_by_pos[(start_row, day_col)] = ev

@@ -9,3 +9,4 @@ class CalendarEvent:
     day_col: int
     duration: int  # în ore (număr de rânduri)
     color: QColor
+    description: str = ""
