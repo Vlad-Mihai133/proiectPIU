@@ -95,6 +95,11 @@ class ScheduleTable(QTableWidget):
 
         src_row = self.row(item)
         src_col = self.column(item)
+        ev = self.events_by_pos.get((src_row, src_col))
+        if ev is not None and ev.locked:
+            # evenimentul este locked -> nu permitem drag
+            return
+
         span_len = max(1, self.rowSpan(src_row, src_col))
 
         self._dragging_src = (src_row, src_col)
@@ -121,7 +126,7 @@ class ScheduleTable(QTableWidget):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Deschide un dialog pentru a crea sau edita un eveniment (nume + descriere)."""
+        """Deschide un dialog pentru a crea sau edita un eveniment (nume + descriere + locked)."""
         posf = event.position()
         p = posf.toPoint()
 
@@ -130,6 +135,7 @@ class ScheduleTable(QTableWidget):
         if row < 0 or col < 0:
             return
 
+        # Găsim evenimentul care acoperă (row, col), chiar dacă userul a dat click pe mijlocul span-ului
         existing_ev = None
         top_row = row
 
@@ -148,26 +154,42 @@ class ScheduleTable(QTableWidget):
 
         item = self.item(top_row, col)
 
+        # numele zilelor, în aceeași ordine ca header-ul tabelului
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
         if existing_ev is not None and item is not None:
-            from event_dialog import EventEditDialog
+            # EDITARE eveniment existent
+            start_hour = existing_ev.start_hour
+            end_hour = existing_ev.end_hour
+            day_name = day_names[existing_ev.day_index] if 0 <= existing_ev.day_index < len(
+                day_names) else f"Day {existing_ev.day_index}"
+            time_info = f"{day_name}, {start_hour:02d}:00 - {end_hour:02d}:00"
+
             dlg = EventEditDialog(
                 title=existing_ev.title,
-                description=getattr(existing_ev, "description", ""),
+                description=existing_ev.description,
+                locked=existing_ev.locked,
+                time_info=time_info,
                 parent=self
             )
             if dlg.exec() == QDialog.Accepted:
-                new_title, new_desc = dlg.get_values()
+                new_title, new_desc, new_locked = dlg.get_values()
                 if new_title:
                     existing_ev.title = new_title
-                    if hasattr(existing_ev, "description"):
-                        existing_ev.description = new_desc
+                    existing_ev.description = new_desc
+                    existing_ev.locked = new_locked
                     item.setText(new_title)
             return
 
-        from event_dialog import EventEditDialog
+        # CREARE eveniment nou
+        day_name = day_names[col] if 0 <= col < len(day_names) else f"Day {col}"
+        start_hour = row
+        end_hour = row + 1
+        time_info = f"{day_name}, {start_hour:02d}:00 - {end_hour:02d}:00"
+
         dlg = EventEditDialog(parent=self)
         if dlg.exec() == QDialog.Accepted:
-            new_title, new_desc = dlg.get_values()
+            new_title, new_desc, new_locked = dlg.get_values()
             if not new_title:
                 return
 
@@ -188,7 +210,8 @@ class ScheduleTable(QTableWidget):
                 day_col=col,
                 duration=1,
                 color=random_color,
-                description=new_desc if hasattr(CalendarEvent, "description") else ""
+                description=new_desc,
+                locked=new_locked
             )
 
     # ===================== Drag & drop =====================
@@ -232,8 +255,15 @@ class ScheduleTable(QTableWidget):
 
         if original_ev is not None:
             """Mută un eveniment existent, ajustând doar evenimentele cu care intră în conflict."""
+            if original_ev.locked:
+                QMessageBox.information(self, "Locked event", "This event is locked and cannot be moved.")
+                event.ignore()
+                return
+
+            # CONSTRÂNGERE 1: nu schimbăm ziua
             col = self._constraint_same_day_column(original_ev, col)
 
+            # CONSTRÂNGERE 2: evenimentul rămâne în zi
             duration = original_ev.duration
             row, duration = self._constraint_within_day(row, duration)
 
@@ -253,6 +283,16 @@ class ScheduleTable(QTableWidget):
                 ev_end = ev.start_row + ev.duration - 1
                 if self._intervals_overlap(new_start, new_end, ev_start, ev_end):
                     conflicts.append(ev)
+
+            locked_conflicts = [ev for ev in conflicts if getattr(ev, "locked", False)]
+            if locked_conflicts:
+                QMessageBox.warning(
+                    self,
+                    "Locked conflict",
+                    "You cannot place an event over a locked event."
+                )
+                event.ignore()
+                return
 
             if conflicts:
                 msg = QMessageBox(self)
@@ -313,6 +353,17 @@ class ScheduleTable(QTableWidget):
         row, span_len = self._constraint_within_day(row, span_len)
 
         overlaps = self._find_overlaps(row, span_len, col)
+
+        locked_overlaps = [ev for ev in overlaps if getattr(ev, "locked", False)]
+        if locked_overlaps:
+            QMessageBox.warning(
+                self,
+                "Locked conflict",
+                "You cannot place an event over a locked event."
+            )
+            event.ignore()
+            return
+
         if overlaps:
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Warning)
@@ -378,11 +429,17 @@ class ScheduleTable(QTableWidget):
         )
 
     def _begin_resize(self, item: QTableWidgetItem, edge: str):
-        """Pornește modul de resize pentru un eveniment, setând ancora și direcția (sus/jos)."""
-        self._resize_active = True
-        self._resize_edge = edge
+        """Pornește modul de resize pentru un eveniment, dacă nu este locked."""
         row = self.row(item)
         col = self.column(item)
+
+        ev = self.events_by_pos.get((row, col))
+        if ev is not None and ev.locked:
+            # evenimentul e locked -> nu permitem resize
+            return
+
+        self._resize_active = True
+        self._resize_edge = edge
         span = max(1, self.rowSpan(row, col))
         top_row = row
         bottom_row = row + span - 1
@@ -719,6 +776,7 @@ class ScheduleTable(QTableWidget):
                 "duration": ev.duration,
                 "color": (ev.color.red(), ev.color.green(), ev.color.blue()),
                 "description": ev.description,
+                "locked": ev.locked,  # nou
             })
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4)
@@ -740,6 +798,7 @@ class ScheduleTable(QTableWidget):
             duration = ev_dict.get("duration", 1)
             color_tuple = ev_dict.get("color", (255, 255, 0))
             description = ev_dict.get("description", "")
+            locked = ev_dict.get("locked", False)
             color = QColor(*color_tuple)
 
             item = QTableWidgetItem(title)
@@ -754,6 +813,7 @@ class ScheduleTable(QTableWidget):
                 day_col=day_col,
                 duration=duration,
                 color=color,
-                description=description
+                description=description,
+                locked=locked
             )
             self.events_by_pos[(start_row, day_col)] = ev
