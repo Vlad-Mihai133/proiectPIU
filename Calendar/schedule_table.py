@@ -35,6 +35,8 @@ class ScheduleTable(QTableWidget):
         self._span_top_row = None
         self._span_len = 1
         self._last_drop_target = None
+        self.disabled_cols: set[int] = set()
+
 
         self.events_by_pos: Dict[Tuple[int, int], CalendarEvent] = {}
         self._dragging_src: Optional[Tuple[int, int]] = None
@@ -59,6 +61,9 @@ class ScheduleTable(QTableWidget):
             p = posf.toPoint()
             item = self.itemAt(p)
             if item is not None:
+                col = self.column(item)
+                if col in self.disabled_cols:
+                    return
                 y = posf.y()
                 near_top, near_bottom = self._is_near_vertical_edge(item, y)
                 if near_top or near_bottom:
@@ -132,6 +137,9 @@ class ScheduleTable(QTableWidget):
         row = self.rowAt(p.y())
         col = self.columnAt(p.x())
         if row < 0 or col < 0:
+            return
+
+        if col in self.disabled_cols:
             return
 
         # Găsim evenimentul care acoperă (row, col), chiar dacă userul a dat click pe mijlocul span-ului
@@ -228,8 +236,14 @@ class ScheduleTable(QTableWidget):
         pos = event.position().toPoint()
         row = self.rowAt(pos.y())
         col = self.columnAt(pos.x())
+
+
         if not self._constraint_inside_window(row, col):
             self._last_drop_target = None
+            event.ignore()
+            return
+
+        if col in self.disabled_cols:
             event.ignore()
             return
 
@@ -435,6 +449,9 @@ class ScheduleTable(QTableWidget):
         ev = self.events_by_pos.get((row, col))
         if ev is not None and ev.locked:
             # evenimentul e locked -> nu permitem resize
+            return
+
+        if col in self.disabled_cols:
             return
 
         self._resize_active = True
@@ -769,3 +786,21 @@ class ScheduleTable(QTableWidget):
         """Setează label-urile pentru header-ul orizontal (zilele)."""
         if len(labels) == self.columnCount():
             self.setHorizontalHeaderLabels(labels)
+
+    def set_disabled_columns(self, cols: list[int]):
+        """Marchează anumite coloane (zile) ca fiind 'disabled' (nu se pot edita)."""
+        self.disabled_cols = set(cols)
+
+        # actualizăm vizual header-ul ca să se vadă că sunt gri
+        from PySide6.QtGui import QBrush
+
+        for c in range(self.columnCount()):
+            item = self.horizontalHeaderItem(c)
+            if item is None:
+                continue
+            if c in self.disabled_cols:
+                item.setForeground(QBrush(QColor("#777777")))   # gri
+            else:
+                item.setForeground(QBrush(QColor("#f5f5f5")))   # alb normal
+
+        self.viewport().update()

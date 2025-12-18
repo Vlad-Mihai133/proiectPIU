@@ -81,6 +81,7 @@ class WeekCalendarWidget(QWidget):
         self.week_label.setText(
             f"Week: {self.current_monday.strftime('%d %b %Y')} - {week_end.strftime('%d %b %Y')}"
         )
+        self._update_disabled_columns()
 
     # ---------------- store <-> tabel ----------------
 
@@ -213,3 +214,27 @@ class WeekCalendarWidget(QWidget):
         # re-desenăm săptămâna curentă
         self._update_headers_and_label()
         self._load_current_week()
+
+    def _update_disabled_columns(self):
+        """Calculează ce zile din săptămâna curentă sunt în trecut și le dezactivează în tabel."""
+        today = date.today()
+        days = self._week_dates()
+
+        disabled_cols: list[int] = []
+
+        week_start = days[0]
+        week_end = days[-1]
+
+        if week_end < today:
+            # săptămână complet în trecut -> toate cele 7 zile dezactivate
+            disabled_cols = list(range(7))
+        elif week_start > today:
+            # săptămână complet în viitor -> nimic dezactivat
+            disabled_cols = []
+        else:
+            # săptămâna curentă -> dezactivăm doar zilele STRICT înainte de azi
+            for idx, d in enumerate(days):
+                if d < today:
+                    disabled_cols.append(idx)
+
+        self.table.set_disabled_columns(disabled_cols)

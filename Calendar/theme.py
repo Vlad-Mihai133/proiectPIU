@@ -77,12 +77,13 @@ APP_DARK_STYLE = """
 
         QHeaderView::section {
             background-color: #393e46;
-            color: #f5f5f5;
             padding: 4px;
             border: 1px solid #4b4f57;
             font-size: 12px;
         }
-
+        QHeaderView::section:vertical {
+            color: #f5f5f5;
+        }
         /* Scrollbars dark (optional) */
         QScrollBar:vertical {
             background: #222831;
