@@ -10,7 +10,10 @@ class CalendarEvent:
     duration: int  # în ore (număr de rânduri)
     color: QColor
     description: str = ""
-    locked: bool = False  # dacă e True, nu poate fi mutat / suprapus
+    locked: bool = False
+    repeat_count: int = 1
+    repeat_forever: bool = False
+    is_generated: bool = False
 
     @property
     def start_hour(self) -> int:

@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QTextEdit,
-    QDialogButtonBox, QLabel, QCheckBox, QMessageBox, QFrame
+    QDialogButtonBox, QLabel, QCheckBox, QMessageBox, QFrame,
+    QSpinBox
 )
 from PySide6.QtCore import Qt
 
@@ -92,9 +93,27 @@ class EventEditDialog(QDialog):
         self.lock_check = QCheckBox("Locked (cannot be moved or overlapped)")
         self.lock_check.setChecked(locked)
 
+        self.repeat_spin = QSpinBox()
+        self.repeat_spin.setRange(1, 100)
+        self.repeat_spin.setValue(1)
+        self.repeat_spin.setToolTip("Number of weekly repetitions (0 = no repeat)")
+
+        self.repeat_forever_check = QCheckBox("Repeat forever")
+        self.repeat_forever_check.toggled.connect(
+            lambda checked: self.repeat_spin.setEnabled(not checked)
+        )
+
+
+        repeat_layout = QHBoxLayout()
+        repeat_layout.addWidget(QLabel("Repeat:"))
+        repeat_layout.addWidget(self.repeat_spin)
+        repeat_layout.addWidget(self.repeat_forever_check)
+
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(14, 12, 14, 12)
         main_layout.setSpacing(8)
+        main_layout.addWidget(self.lock_check)
+        main_layout.addLayout(repeat_layout)
 
         # ===== Header cu info de timp =====
         if time_info:
@@ -168,4 +187,6 @@ class EventEditDialog(QDialog):
             self.title_edit.text().strip(),
             self.desc_edit.toPlainText().strip(),
             self.lock_check.isChecked(),
+            self.repeat_spin.value(),
+            self.repeat_forever_check.isChecked(),
         )

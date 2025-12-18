@@ -89,17 +89,20 @@ class WeekCalendarWidget(QWidget):
         """
         Copiază evenimentele din tabel în store-ul global (events_by_date)
         pentru cele 7 zile ale săptămânii curente.
+        Salvează DOAR evenimentele de bază (nu și aparițiile generate).
         """
-        # 1. ștergem din store toate evenimentele pentru zilele acestei săptămâni
+        # ștergem evenimentele bază pentru zilele acestei săptămâni
         for d in self._week_dates():
             self.events_by_date.pop(d.isoformat(), None)
 
-        # 2. re-adăugăm din tabel evenimentele actuale ale săptămânii
+        # re-adăugăm evenimentele de bază din tabel
         for (row, col), ev in self.table.events_by_pos.items():
-            # col = 0..6 => offset față de current_monday
+            # Sărim peste aparițiile generate de recurență
+            if ev.is_generated:
+                continue
+
             ev_date = self.current_monday + timedelta(days=ev.day_col)
             dstr = ev_date.isoformat()
-
             color_tuple = (ev.color.red(), ev.color.green(), ev.color.blue())
 
             day_events = self.events_by_date.setdefault(dstr, [])
@@ -110,46 +113,71 @@ class WeekCalendarWidget(QWidget):
                 "color": color_tuple,
                 "description": ev.description,
                 "locked": ev.locked,
+                "repeat_count": ev.repeat_count,
+                "repeat_forever": ev.repeat_forever,
             })
 
     def _load_current_week(self):
         """
-        Reîncarcă în tabel doar evenimentele pentru săptămâna curentă din store-ul global.
+        Reîncarcă în tabel evenimentele pentru săptămâna curentă, inclusiv recurențele.
         """
         self.table.reset_table()
+        week_days = self._week_dates()  # list[date]
 
-        for d_idx, current_date in enumerate(self._week_dates()):
-            dstr = current_date.isoformat()
-            events = self.events_by_date.get(dstr, [])
+        for base_date_str, events in self.events_by_date.items():
+            base_date = date.fromisoformat(base_date_str)
+
             for ev_dict in events:
                 title = ev_dict.get("title", "")
-                start_row = ev_dict.get("hour", 0)
+                hour = ev_dict.get("hour", 0)
                 duration = ev_dict.get("duration", 1)
                 color_tuple = ev_dict.get("color", (255, 255, 0))
                 description = ev_dict.get("description", "")
                 locked = ev_dict.get("locked", False)
+                repeat_count = max(1, ev_dict.get("repeat_count", 1))
+                repeat_forever = ev_dict.get("repeat_forever", False)
 
                 color = QColor(*color_tuple)
                 brush = QBrush(color)
 
-                item = QTableWidgetItem(title)
-                item.setTextAlignment(Qt.AlignCenter)
-                item.setBackground(brush)
-                item.setData(Qt.BackgroundRole, brush)
+                for col_idx, current_date in enumerate(week_days):
+                    diff_days = (current_date - base_date).days
+                    if diff_days < 0:
+                        continue
+                    if diff_days % 7 != 0:
+                        continue
 
-                self.table.setItem(start_row, d_idx, item)
-                self.table.setSpan(start_row, d_idx, duration, 1)
+                    k = diff_days // 7  # a câta apariție (0 = event de bază în săptămâna sa)
+                    if k == 0:
+                        if repeat_count < 1 and not repeat_forever:
+                            continue
+                    else:
+                        if not repeat_forever and k >= repeat_count:
+                            continue  # în afara numărului de repetări
 
-                ev = CalendarEvent(
-                    title=title,
-                    start_row=start_row,
-                    day_col=d_idx,
-                    duration=duration,
-                    color=color,
-                    description=description,
-                    locked=locked
-                )
-                self.table.events_by_pos[(start_row, d_idx)] = ev
+                    is_generated = (k > 0)
+
+                    item = QTableWidgetItem(title)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    item.setBackground(brush)
+                    item.setData(Qt.BackgroundRole, brush)
+
+                    self.table.setItem(hour, col_idx, item)
+                    self.table.setSpan(hour, col_idx, duration, 1)
+
+                    ev = CalendarEvent(
+                        title=title,
+                        start_row=hour,
+                        day_col=col_idx,
+                        duration=duration,
+                        color=color,
+                        description=description,
+                        locked=locked,
+                        repeat_count=repeat_count,
+                        repeat_forever=repeat_forever,
+                        is_generated=is_generated,
+                    )
+                    self.table.events_by_pos[(hour, col_idx)] = ev
 
         self.table.viewport().update()
 
@@ -199,7 +227,6 @@ class WeekCalendarWidget(QWidget):
             dstr = ev.get("date")
             if not dstr:
                 continue
-            # copiem fără cheia "date"
             ev_copy = {
                 "title": ev.get("title", ""),
                 "hour": ev.get("hour", 0),
@@ -207,6 +234,8 @@ class WeekCalendarWidget(QWidget):
                 "color": tuple(ev.get("color", (255, 255, 0))),
                 "description": ev.get("description", ""),
                 "locked": ev.get("locked", False),
+                "repeat_count": max(1, ev.get("repeat_count", 1)),
+                "repeat_forever": ev.get("repeat_forever", False),
             }
             day_events = self.events_by_date.setdefault(dstr, [])
             day_events.append(ev_copy)

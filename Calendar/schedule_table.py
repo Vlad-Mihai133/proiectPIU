@@ -179,12 +179,19 @@ class ScheduleTable(QTableWidget):
                 time_info=time_info,
                 parent=self
             )
+            dlg.repeat_spin.setValue(existing_ev.repeat_count or 1)
+            dlg.repeat_forever_check.setChecked(existing_ev.repeat_forever)
+            if existing_ev.repeat_forever:
+                dlg.repeat_spin.setEnabled(False)
+
             if dlg.exec() == QDialog.Accepted:
-                new_title, new_desc, new_locked = dlg.get_values()
+                new_title, new_desc, new_locked, repeat_count, repeat_forever = dlg.get_values()
                 if new_title:
                     existing_ev.title = new_title
                     existing_ev.description = new_desc
                     existing_ev.locked = new_locked
+                    existing_ev.repeat_count = repeat_count
+                    existing_ev.repeat_forever = repeat_forever
                     item.setText(new_title)
             return
 
@@ -194,9 +201,9 @@ class ScheduleTable(QTableWidget):
         end_hour = row + 1
         time_info = f"{day_name}, {start_hour:02d}:00 - {end_hour:02d}:00"
 
-        dlg = EventEditDialog(parent=self)
+        dlg = EventEditDialog(time_info=time_info, parent=self)
         if dlg.exec() == QDialog.Accepted:
-            new_title, new_desc, new_locked = dlg.get_values()
+            new_title, new_desc, new_locked, repeat_count, repeat_forever = dlg.get_values()
             if not new_title:
                 return
 
@@ -218,7 +225,9 @@ class ScheduleTable(QTableWidget):
                 duration=1,
                 color=random_color,
                 description=new_desc,
-                locked=new_locked
+                locked=new_locked,
+                repeat_count=repeat_count,
+                repeat_forever=repeat_forever,
             )
 
     # ===================== Drag & drop =====================
