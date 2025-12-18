@@ -1,3 +1,5 @@
+import json
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -7,6 +9,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QAction
 from schedule_table import ScheduleTable
+from week_calendar_widget import WeekCalendarWidget
+from theme import APP_DARK_STYLE
 
 
 class MainWindow(QMainWindow):
@@ -14,13 +18,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Calendar")
         self.setFixedSize(920, 700)
-        self.setStyleSheet("background-color: #f5f5f5;")
+        self.setStyleSheet(APP_DARK_STYLE)
 
         central_widget = QWidget()
         layout = QHBoxLayout(central_widget)
 
-        self.schedule_table = ScheduleTable(24, 7)
-        layout.addWidget(self.schedule_table)
+        self.week_calendar = WeekCalendarWidget(self)
+        layout.addWidget(self.week_calendar)
 
         self.setCentralWidget(central_widget)
 
@@ -40,11 +44,15 @@ class MainWindow(QMainWindow):
             self, "Salvează orarul", "", "JSON Files (*.json)"
         )
         if file_path:
-            self.schedule_table.save_to_json(file_path)
+            state = self.week_calendar.export_all_events()
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=4)
 
     def load_schedule(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Încarcă orarul", "", "JSON Files (*.json)"
         )
         if file_path:
-            self.schedule_table.load_from_json(file_path)
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.week_calendar.load_all_events(data)

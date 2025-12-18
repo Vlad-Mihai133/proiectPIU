@@ -14,7 +14,6 @@ from PySide6.QtGui import QDrag, QMouseEvent, QColor
 from models import CalendarEvent
 from event_dialog import EventEditDialog
 
-
 class ScheduleTable(QTableWidget):
     def __init__(self, rows: int, cols: int):
         """Initializează tabelul de program și modelul intern de evenimente."""
@@ -751,10 +750,10 @@ class ScheduleTable(QTableWidget):
             return False
         return True
 
-    # ===================== Salvare / load =====================
+    # ===================== HELPERS =====================
 
     def reset_table(self):
-        """Curăță complet tabelul și modelul de evenimente (item-uri, span-uri, structură internă)."""
+        """Resetează complet conținutul: șterge item-urile, span-urile și modelul de evenimente."""
         for r in range(self.rowCount()):
             for c in range(self.columnCount()):
                 if self.rowSpan(r, c) != 1 or self.columnSpan(r, c) != 1:
@@ -764,56 +763,9 @@ class ScheduleTable(QTableWidget):
                     self.takeItem(r, c)
 
         self.events_by_pos.clear()
+        self.viewport().update()
 
-    def save_to_json(self, file_path: str):
-        """Salvează toate evenimentele din model într-un fișier JSON."""
-        data = []
-        for (row, col), ev in self.events_by_pos.items():
-            data.append({
-                "title": ev.title,
-                "start_row": ev.start_row,
-                "day_col": ev.day_col,
-                "duration": ev.duration,
-                "color": (ev.color.red(), ev.color.green(), ev.color.blue()),
-                "description": ev.description,
-                "locked": ev.locked,  # nou
-            })
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
-
-    def load_from_json(self, file_path: str):
-        """Încarcă evenimentele dintr-un fișier JSON și reconstruiește tabelul și modelul."""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            return
-
-        self.reset_table()
-
-        for ev_dict in data:
-            title = ev_dict.get("title", "")
-            start_row = ev_dict.get("start_row", 0)
-            day_col = ev_dict.get("day_col", 0)
-            duration = ev_dict.get("duration", 1)
-            color_tuple = ev_dict.get("color", (255, 255, 0))
-            description = ev_dict.get("description", "")
-            locked = ev_dict.get("locked", False)
-            color = QColor(*color_tuple)
-
-            item = QTableWidgetItem(title)
-            item.setTextAlignment(Qt.AlignCenter)
-            item.setBackground(color)
-            self.setItem(start_row, day_col, item)
-            self.setSpan(start_row, day_col, duration, 1)
-
-            ev = CalendarEvent(
-                title=title,
-                start_row=start_row,
-                day_col=day_col,
-                duration=duration,
-                color=color,
-                description=description,
-                locked=locked
-            )
-            self.events_by_pos[(start_row, day_col)] = ev
+    def set_day_labels(self, labels: list[str]):
+        """Setează label-urile pentru header-ul orizontal (zilele)."""
+        if len(labels) == self.columnCount():
+            self.setHorizontalHeaderLabels(labels)
