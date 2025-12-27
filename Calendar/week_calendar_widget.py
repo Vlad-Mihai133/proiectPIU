@@ -12,8 +12,8 @@ from models import CalendarEvent
 
 class WeekCalendarWidget(QWidget):
     """
-    Widget care afișează un ScheduleTable pentru o săptămână și păstrează
-    evenimentele pentru toate săptămânile (events_by_date).
+    Widget care afiseaza un ScheduleTable pentru o saptamana si pastreaza
+    evenimentele pentru toate saptamanile (events_by_date).
     """
 
     def __init__(self, parent=None, start_monday: date | None = None):
@@ -21,7 +21,7 @@ class WeekCalendarWidget(QWidget):
 
         self.current_monday: date = self._ensure_monday(start_monday or date.today())
 
-        # Store global: cheie = "YYYY-MM-DD", valoare = listă de dict-uri de event
+        # Store global: cheie = "YYYY-MM-DD", valoare = lista de dict-uri de event
         # dict-urile au schema: {
         #     "title", "hour", "duration", "color": (r,g,b),
         #     "description", "locked"
@@ -53,22 +53,22 @@ class WeekCalendarWidget(QWidget):
         self.prev_btn.clicked.connect(self._go_prev_week)
         self.next_btn.clicked.connect(self._go_next_week)
 
-        # inițializează header + încărcare evenimente pentru săptămâna curentă
+        # initializeaza header + incarcare evenimente pentru saptamana curenta
         self._update_headers_and_label()
         self._load_current_week()
 
     # ---------------- helpers interne ----------------
 
     def _ensure_monday(self, any_day: date) -> date:
-        """Returnează luni din săptămâna care conține any_day."""
+        """Returneaza luni din saptamana care contine any_day."""
         return any_day - timedelta(days=any_day.weekday())
 
     def _week_dates(self) -> list[date]:
-        """Returnează lista cu cele 7 date din săptămâna curentă (luni-duminică)."""
+        """Returneaza lista cu cele 7 date din saptamana curenta (luni-duminica)."""
         return [self.current_monday + timedelta(days=i) for i in range(7)]
 
     def _update_headers_and_label(self):
-        """Actualizează header-ul tabelului și label-ul cu intervalul săptămânii curente."""
+        """Actualizeaza header-ul tabelului si label-ul cu intervalul saptamanii curente."""
         day_labels: list[str] = []
         for d in self._week_dates():
             day_name = d.strftime("%a")  # Mon, Tue, ...
@@ -87,17 +87,17 @@ class WeekCalendarWidget(QWidget):
 
     def _store_current_week(self):
         """
-        Copiază evenimentele din tabel în store-ul global (events_by_date)
-        pentru cele 7 zile ale săptămânii curente.
-        Salvează DOAR evenimentele de bază (nu și aparițiile generate).
+        Copiaza evenimentele din tabel in store-ul global (events_by_date)
+        pentru cele 7 zile ale saptamanii curente.
+        Salveaza DOAR evenimentele de baza (nu si aparitiile generate).
         """
-        # ștergem evenimentele bază pentru zilele acestei săptămâni
+        # stergem evenimentele baza pentru zilele acestei saptamani
         for d in self._week_dates():
             self.events_by_date.pop(d.isoformat(), None)
 
-        # re-adăugăm evenimentele de bază din tabel
+        # re-adaugam evenimentele de baza din tabel
         for (row, col), ev in self.table.events_by_pos.items():
-            # Sărim peste aparițiile generate de recurență
+            # Sarim peste aparitiile generate de recurenta
             if ev.is_generated:
                 continue
 
@@ -119,7 +119,7 @@ class WeekCalendarWidget(QWidget):
 
     def _load_current_week(self):
         """
-        Reîncarcă în tabel evenimentele pentru săptămâna curentă, inclusiv recurențele.
+        Reincarca in tabel evenimentele pentru saptamana curenta, inclusiv recurentele.
         """
         self.table.reset_table()
         week_days = self._week_dates()  # list[date]
@@ -147,13 +147,13 @@ class WeekCalendarWidget(QWidget):
                     if diff_days % 7 != 0:
                         continue
 
-                    k = diff_days // 7  # a câta apariție (0 = event de bază în săptămâna sa)
+                    k = diff_days // 7  # a cata aparitie (0 = event de baza in saptamana sa)
                     if k == 0:
                         if repeat_count < 1 and not repeat_forever:
                             continue
                     else:
                         if not repeat_forever and k >= repeat_count:
-                            continue  # în afara numărului de repetări
+                            continue  # in afara numarului de repetari
 
                     is_generated = (k > 0)
 
@@ -181,45 +181,45 @@ class WeekCalendarWidget(QWidget):
 
         self.table.viewport().update()
 
-    # ---------------- navigare săptămâni ----------------
+    # ---------------- navigare saptamani ----------------
 
     def _go_prev_week(self):
-        """Navighează la săptămâna anterioară, păstrând evenimentele în store."""
+        """Navigheaza la saptamana anterioara, pastrand evenimentele in store."""
         self._store_current_week()
         self.current_monday -= timedelta(days=7)
         self._update_headers_and_label()
         self._load_current_week()
 
     def _go_next_week(self):
-        """Navighează la săptămâna următoare, păstrând evenimentele în store."""
+        """Navigheaza la saptamana urmatoare, pastrand evenimentele in store."""
         self._store_current_week()
         self.current_monday += timedelta(days=7)
         self._update_headers_and_label()
         self._load_current_week()
 
-    # ---------------- serializare globală pentru Save/Load ----------------
+    # ---------------- serializare globala pentru Save/Load ----------------
 
     def export_all_events(self) -> dict:
         """
-        Returnează un dict serializabil JSON cu toate evenimentele
-        (pentru toate săptămânile/lunile).
+        Returneaza un dict serializabil JSON cu toate evenimentele
+        (pentru toate saptamanile/lunile).
         """
-        # mai întâi salvăm ce e în săptămâna curentă în store
+        # mai intai salvam ce e in saptamana curenta in store
         self._store_current_week()
 
         all_events: list[dict] = []
         for dstr, events in self.events_by_date.items():
             for ev in events:
                 ev_copy = ev.copy()
-                ev_copy["date"] = dstr  # adăugăm cheia de dată
+                ev_copy["date"] = dstr  # adaugam cheia de data
                 all_events.append(ev_copy)
 
         return {"events": all_events}
 
     def load_all_events(self, data: dict):
         """
-        Reîncarcă toate evenimentele dintr-un dict JSON (formatul export_all_events)
-        și afișează doar săptămâna curentă.
+        Reincarca toate evenimentele dintr-un dict JSON (formatul export_all_events)
+        si afiseaza doar saptamana curenta.
         """
         self.events_by_date.clear()
 
@@ -240,12 +240,12 @@ class WeekCalendarWidget(QWidget):
             day_events = self.events_by_date.setdefault(dstr, [])
             day_events.append(ev_copy)
 
-        # re-desenăm săptămâna curentă
+        # re-desenam saptamana curenta
         self._update_headers_and_label()
         self._load_current_week()
 
     def _update_disabled_columns(self):
-        """Calculează ce zile din săptămâna curentă sunt în trecut și le dezactivează în tabel."""
+        """Calculeaza ce zile din saptamana curenta sunt in trecut si le dezactiveaza in tabel."""
         today = date.today()
         days = self._week_dates()
 
@@ -255,13 +255,13 @@ class WeekCalendarWidget(QWidget):
         week_end = days[-1]
 
         if week_end < today:
-            # săptămână complet în trecut -> toate cele 7 zile dezactivate
+            # saptamana complet in trecut -> toate cele 7 zile dezactivate
             disabled_cols = list(range(7))
         elif week_start > today:
-            # săptămână complet în viitor -> nimic dezactivat
+            # saptamana complet in viitor -> nimic dezactivat
             disabled_cols = []
         else:
-            # săptămâna curentă -> dezactivăm doar zilele STRICT înainte de azi
+            # saptamana curenta -> dezactivam doar zilele STRICT inainte de azi
             for idx, d in enumerate(days):
                 if d < today:
                     disabled_cols.append(idx)

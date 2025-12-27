@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class CalendarEvent:
-    """Reprezintă un eveniment din calendar."""
+    """Reprezinta un eveniment din calendar."""
     title: str
     start_row: int
     day_col: int
@@ -17,7 +17,7 @@ class CalendarEvent:
 
     @property
     def start_hour(self) -> int:
-        """Ora de start (egală cu start_row)."""
+        """Ora de start (egala cu start_row)."""
         return self.start_row
 
     @property

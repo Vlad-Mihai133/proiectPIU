@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
 
     def save_schedule(self):
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Salvează orarul", "", "JSON Files (*.json)"
+            self, "Salveaza orarul", "", "JSON Files (*.json)"
         )
         if file_path:
             state = self.week_calendar.export_all_events()
@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
 
     def load_schedule(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Încarcă orarul", "", "JSON Files (*.json)"
+            self, "Incarca orarul", "", "JSON Files (*.json)"
         )
         if file_path:
             with open(file_path, "r", encoding="utf-8") as f:

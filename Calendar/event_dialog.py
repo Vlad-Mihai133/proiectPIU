@@ -21,7 +21,7 @@ class EventEditDialog(QDialog):
         self.setWindowTitle("Event details")
         self.setMinimumWidth(420)
 
-        # Stilizare generală (poți ajusta culorile după gust)
+        # Stilizare generala (poti ajusta culorile dupa gust)
         self.setStyleSheet("""
             QDialog {
                 background-color: #222831;
@@ -160,12 +160,12 @@ class EventEditDialog(QDialog):
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             parent=self
         )
-        # Validare manuală pe OK (nu lăsăm titlu gol)
+        # Validare manuala pe OK (nu lasam titlu gol)
         ok_button = buttons.button(QDialogButtonBox.Ok)
         if ok_button is not None:
             ok_button.clicked.connect(self._validate_title)
         else:
-            # fallback în caz că butonul nu e creat încă
+            # fallback in caz ca butonul nu e creat inca
             buttons.accepted.connect(self._validate_title)
 
         buttons.rejected.connect(self.reject)
@@ -174,7 +174,7 @@ class EventEditDialog(QDialog):
         self.setLayout(main_layout)
 
     def _validate_title(self):
-        """Nu permite OK dacă titlul este gol."""
+        """Nu permite OK daca titlul este gol."""
         title = self.title_edit.text().strip()
         if not title:
             QMessageBox.warning(self, "Invalid title", "Title cannot be empty.")
@@ -182,7 +182,7 @@ class EventEditDialog(QDialog):
         self.accept()
 
     def get_values(self):
-        """Returnează titlul, descrierea și starea locked."""
+        """Returneaza titlul, descrierea si starea locked."""
         return (
             self.title_edit.text().strip(),
             self.desc_edit.toPlainText().strip(),
